@@ -1,0 +1,48 @@
+name: Build APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find project
+        id: proj
+        run: |
+          f=$(find . -name settings.gradle.kts | head -n1)
+          if [ -z "$f" ]; then
+            echo "settings.gradle.kts NOT FOUND. Files in repo:"
+            find . -not -path "./.git/*" | head -60
+            exit 1
+          fi
+          echo "dir=$(dirname "$f")" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Download UEFI firmware
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: |
+          sudo apt-get update
+          apt-get download qemu-efi-aarch64
+          dpkg -x qemu-efi-aarch64*.deb efi
+          mkdir -p app/src/main/assets
+          cp efi/usr/share/qemu-efi-aarch64/QEMU_EFI.fd app/src/main/assets/edk2-aarch64-code.fd
+          truncate -s 64M app/src/main/assets/edk2-aarch64-code.fd
+
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.7
+
+      - name: Build
+        working-directory: ${{ steps.proj.outputs.dir }}
+        run: gradle assembleDebug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WinEmu-debug-apk
+          path: ${{ steps.proj.outputs.dir }}/app/build/outputs/apk/debug/*.apk
